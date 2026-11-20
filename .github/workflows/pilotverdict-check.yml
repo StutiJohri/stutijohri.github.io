@@ -1,0 +1,43 @@
+name: Verify PilotVerdict release
+on:
+  push:
+    branches: ['release/pilotverdict-simple-2026-11-20']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Inspect existing portfolio structure
+        run: |
+          python - <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          class P(HTMLParser):
+              def handle_starttag(self, tag, attrs):
+                  a=dict(attrs)
+                  if tag in ('nav','section') or (tag=='a' and not a.get('href','').startswith('data:')):
+                      print(tag, {k:v[:180] for k,v in a.items() if k in ('id','class','href')})
+              def handle_data(self, data):
+                  s=data.strip()
+                  if s and len(s)<180 and ('Pilot' in s or 'Project' in s or 'Work' in s): print('TEXT',s)
+          P().feed(Path('index.html').read_text())
+          PY
+      - name: Release tests
+        if: ${{ hashFiles('pilotverdict/package.json') != '' }}
+        working-directory: pilotverdict
+        run: |
+          npm test
+          npm run build
+          pip install playwright==1.56.0
+          python -m playwright install --with-deps chromium
+          python scripts/release_browser_test.py
