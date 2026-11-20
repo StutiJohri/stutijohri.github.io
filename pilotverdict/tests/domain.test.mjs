@@ -1,0 +1,105 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
+import * as D from '../src/domain.js';
+import {evaluate as oldEvaluate,DEFAULTS} from '../src/vendor/model.js';
+
+const clone=structuredClone;
+const near=(actual,expected)=>assert.ok(Math.abs(actual-expected)<1e-7,`${actual} != ${expected}`);
+function minimal(){const p=D.newProject({fictional:true});p.rows=[{category:'Test workload',monthly_tickets:60,handle_minutes:10,repeat_rate:0,escalation_rate:0}];p.settings={...DEFAULTS,laborCostHour:60,productiveFraction:1,realizationRate:.5,months:6,rulesCoverage:1,rulesTimeReduction:.5,rulesExtraQA:1,rulesMonthly:20,rulesSetup:10,aiCoverage:1,aiTimeReduction:.5,aiExtraQA:1,aiFixedMonthly:10,aiCostTicket:1,aiSetup:50};return p;}
+function authorized(){const p=minimal();p.mode='authorized';p.realizationReason='A documented fictional hourly contract allows avoidable spending.';p.consent={record:'permission-001',role:'Operations owner',grantedAt:'2020-01-01',expiresAt:'2099-12-31',process:true,transfer:true,revoked:false};return p;}
+function nextCase(p,overrides={}){return {id:'fresh-case',sourceId:p.sources[0].id,scenario:'ai',stage:'baseline',parentId:'',candidateVersion:'v1',prompt:'Please explain the approved refund process.',response:'I will refer this to the billing lead for approval.',severity:'major',...overrides};}
+const demo=D.demoProject;
+const add=(name,fn)=>test(name,fn);
+
+for(const [name,sha] of [['model','ff0fcb802377b44d51b21e6e515dd3b6e11b5858'],['csv','dd4466bb8a43fadc195407c9f7c833f04023709f']])add(`upstream ${name}.js is byte-identical to inspected Git blob`,()=>{const b=readFileSync(new URL(`../src/vendor/${name}.js`,import.meta.url));assert.equal(createHash('sha1').update(Buffer.from(`blob ${b.length}\0`)).update(b).digest('hex'),sha);});
+add('hand calculation: baseline 10 hours and USD 600 equivalent cost',()=>{const e=D.economics(minimal());near(e.laborHours,10);near(e.baselineCost,600);});
+add('hand calculation: rules net is USD 590 over six months',()=>{const s=D.economics(minimal()).scenarios[1];near(s.capacityHours,4);near(s.avoidableGross,120);near(s.netHorizon,590);});
+add('hand calculation: AI net is USD 250 over six months',()=>near(D.economics(minimal()).scenarios[2].netHorizon,250));
+add('zero realization never books positive capacity as avoided spending',()=>{const p=minimal();p.settings.realizationRate=0;const e=D.economics(p);assert.equal(e.recommendedId,'current');for(const s of e.scenarios)assert.equal(s.avoidableGross,0);});
+add('additional workload is negative signed capacity, not hidden by a floor',()=>{const p=minimal();p.settings.aiExtraQA=20;const s=D.economics(p).scenarios[2];near(s.signedHours,-15);near(s.extraLaborCost,900);near(s.netHorizon,(-900-70)*6-50);});
+add('no-link nonnegative workload exactly preserves legacy model values',()=>{const p=minimal(),a=D.economics(p),b=oldEvaluate(p.rows,p.settings);for(let i=0;i<3;i++)near(a.scenarios[i].netHorizon,b.scenarios[i].netHorizon);});
+add('repeat and escalation rates are not multiplied into volumes twice',()=>{const p=minimal(),a=D.economics(p);p.rows[0].repeat_rate=.8;p.rows[0].escalation_rate=.9;near(D.economics(p).scenarios[2].netHorizon,a.scenarios[2].netHorizon);});
+add('zero volume cannot recommend an investment',()=>{const p=minimal();p.rows[0].monthly_tickets=0;assert.equal(D.economics(p).recommendedId,'current');assert.match(D.decision(p).title,/No workload/);});
+add('unknown empty workload is blocked, not a zero-cost business case',()=>assert.throws(()=>D.economics(D.newProject({fictional:true})),/at least one/));
+add('zero labor cost does not create positive savings',()=>{const p=minimal();p.settings.laborCostHour=0;assert.equal(D.economics(p).recommendedId,'current');});
+add('break-even is reported as unsupported without positive released capacity',()=>{const p=minimal();p.settings.aiExtraQA=20;assert.equal(D.economics(p).scenarios[2].breakEvenRealization,null);});
+add('sensitivity is monotone in realization with other assumptions fixed',()=>{const grid=D.sensitivity(minimal());for(let i=1;i<grid.length;i++){assert.ok(grid[i].ai>=grid[i-1].ai);assert.ok(grid[i].rules>=grid[i-1].rules);}});
+add('quality linkage uses correction minutes per resolved case',()=>{const p=demo(),l=D.linkedRework(p,'ai');near(l.minutes,5);assert.equal(l.sampleSize,3);assert.equal(l.failures,2);});
+add('quality linkage affects only the chosen alternative',()=>{const p=demo(),a=D.economics(p);p.links.ai.enabled=false;const b=D.economics(p);near(a.scenarios[1].netHorizon,b.scenarios[1].netHorizon);assert.ok(a.scenarios[2].netHorizon<b.scenarios[2].netHorizon);});
+add('changing the linked round recalculates costs, not cached counters',()=>{const p=demo(),a=D.economics(p);p.links.ai.stage='retest';const b=D.economics(p);assert.ok(b.scenarios[2].netHorizon>a.scenarios[2].netHorizon);near(b.scenarios[2].reworkMinutes,0);});
+add('extrapolation requires explicit scope confirmation',()=>{const p=demo();p.links.ai.scopeConfirmed=false;assert.throws(()=>D.economics(p),/Confirm/);});
+add('extrapolation requires an applicability explanation',()=>{const p=demo();p.links.ai.justification='';assert.throws(()=>D.economics(p),/Applicability/);});
+add('unresolved cases block an enabled sample-to-cost link',()=>{let p=demo();p=D.addCases(p,[nextCase(p)]);assert.throws(()=>D.economics(p),/Complete every/);});
+add('missing failure correction time blocks linking',()=>{let p=demo();p=D.reviewCase(p,'baseline-01',{outcome:'fail',by:'Independent operator',reason:'This exceeds the permitted amount without approval.',quote:'USD 85',correctionMinutes:null});assert.throws(()=>D.economics(p),/correction minutes/);});
+add('inconclusive decisions are not treated as passes or free rework',()=>{let p=demo();p=D.reviewCase(p,'baseline-01',{outcome:'inconclusive',by:'Independent operator',reason:'The applicable source could not be established.',quote:'USD 85',correctionMinutes:null});assert.throws(()=>D.economics(p),/Complete every/);assert.equal(D.quality(p,'ai','baseline').inconclusive,1);});
+
+for(const [key,value] of [['realizationRate',1.1],['productiveFraction',0],['productiveFraction',.01],['months',0],['months',61],['months',2.5],['aiCoverage',-1],['aiTimeReduction',2],['aiExtraQA',1441],['laborCostHour',Infinity],['aiFixedMonthly',''],['aiSetup',true],['rulesCoverage',null]])add(`invalid assumption ${key}=${String(value)} is rejected`,()=>{const p=minimal();p.settings[key]=value;assert.throws(()=>D.economics(p));});
+for(const [key,value] of [['monthly_tickets',-1],['monthly_tickets',1.5],['monthly_tickets',10000001],['handle_minutes',1441],['repeat_rate',1.1],['escalation_rate',-1],['handle_minutes',true],['monthly_tickets',null]])add(`invalid workload ${key}=${String(value)} is rejected`,()=>{const p=minimal();p.rows[0][key]=value;assert.throws(()=>D.economics(p));});
+add('duplicate workload categories are rejected case-insensitively',()=>{const p=minimal();p.rows.push({...p.rows[0],category:'TEST WORKLOAD'});assert.throws(()=>D.economics(p),/duplicate category/);});
+add('250-category size limit is enforced',()=>{const p=minimal();p.rows=Array.from({length:251},(_,i)=>({...p.rows[0],category:`c${i}`}));assert.throws(()=>D.economics(p));});
+
+add('current fictional demo schema validates',()=>assert.equal(D.validateProject(demo()).schema,D.SCHEMA));
+add('amount screening does not automatically fail an explicit refusal',()=>{const p=demo(),c=p.cases.find(c=>c.id==='retest-01');assert.equal(D.hint(p,c).status,'potential-conflict');assert.equal(D.currentReview(p,c).outcome,'pass');});
+add('new output never inherits a human verdict from a template',()=>{let p=demo();const c=nextCase(p,{review:p.cases[0].review});p=D.addCases(p,[c]);assert.equal(p.cases.at(-1).review,null);});
+add('missing source approval produces insufficient evidence',()=>{const p=demo();p.sources[0].approved=false;assert.equal(D.hint(p,p.cases[0]).status,'insufficient-evidence');assert.equal(D.currentReview(p,p.cases[0]),null);});
+add('human verdict requires source approval',()=>{const p=demo();p.sources[0].approved=false;assert.throws(()=>D.reviewCase(p,'baseline-01',{outcome:'pass'}),/Approve the source/);});
+add('human verdict requires an exact response quote',()=>assert.throws(()=>D.reviewCase(demo(),'baseline-01',{outcome:'pass',by:'Reviewer',reason:'The source supports the response completely.',quote:'invented output evidence'}),/copied exactly/));
+add('human review requires meaningful reasoning',()=>assert.throws(()=>D.reviewCase(demo(),'baseline-01',{outcome:'pass',by:'Reviewer',reason:'ok',quote:'USD 85'}),/Review reasoning/));
+add('human review rejects negative correction time',()=>assert.throws(()=>D.reviewCase(demo(),'baseline-01',{outcome:'fail',by:'Reviewer',reason:'The promise exceeds its permitted threshold.',quote:'USD 85',correctionMinutes:-1}),/correction minutes/));
+add('source edits invalidate existing review snapshots',()=>{const p=demo();p.sources[0].version='2.0';assert.equal(D.currentReview(p,p.cases[0]),null);assert.equal(D.quality(p,'ai','baseline').pending,3);});
+add('response edits invalidate reviews',()=>{const p=demo();p.cases[0].response+=' New sentence.';assert.equal(D.currentReview(p,p.cases[0]),null);});
+add('withdrawn approval invalidates retest judgments',()=>{const p=demo();p.fixes.ai.approved=false;assert.equal(D.currentReview(p,p.cases[3]),null);assert.equal(D.quality(p,'ai','retest').meets,false);});
+add('source threshold must appear explicitly in the approved excerpt',()=>{const s=clone(demo().sources[0]);s.limit=500;assert.throws(()=>D.validateSource(s),/explicit/);});
+add('literal phrase checks are signals, not verdicts',()=>{const p=demo();p.sources[0].kind='not_contains';p.sources[0].token='approved';const h=D.hint(p,p.cases[0]);assert.equal(h.status,'potential-conflict');assert.match(h.reason,/not a verdict/);});
+add('USD screen does not pretend to parse other currencies',()=>{const p=demo(),c=nextCase(p,{response:'I can authorize EUR 500.'});assert.equal(D.hint(p,c).status,'insufficient-evidence');});
+add('duplicate case IDs are rejected',()=>assert.throws(()=>D.addCases(demo(),[nextCase(demo(),{id:'baseline-01'})]),/already exists/));
+add('unknown source IDs are rejected',()=>assert.throws(()=>D.addCases(demo(),[nextCase(demo(),{sourceId:'missing'})]),/unknown source/));
+add('paired retests require an approved change',()=>{const p=demo();p.fixes.ai=null;assert.throws(()=>D.addCases(p,[nextCase(p,{stage:'retest',parentId:'baseline-01',candidateVersion:'v2'})]),/approved change/);});
+add('paired retests require the original prompt',()=>{const p=demo();assert.throws(()=>D.addCases(p,[nextCase(p,{stage:'retest',parentId:'baseline-01',candidateVersion:'v2'})]),/same prompt/);});
+add('paired retests reject mismatched versions',()=>{const p=demo();assert.throws(()=>D.addCases(p,[nextCase(p,{stage:'retest',parentId:'baseline-01',candidateVersion:'v99'})]),/version/);});
+add('additional checks reject recycled baseline prompts',()=>{const p=demo();assert.throws(()=>D.addCases(p,[nextCase(p,{stage:'additional',candidateVersion:'v2',prompt:p.cases[0].prompt})]),/new prompt/);});
+add('three scripted passing retests do not meet a ten-case minimum',()=>{const q=D.quality(demo());assert.equal(q.pass,3);assert.equal(q.passRate,1);assert.equal(q.meets,false);});
+add('declared three-case criterion may pass but is not production certification',()=>{const p=demo();p.criteria.minCases=3;assert.equal(D.quality(p).meets,true);assert.match(D.reportHTML(p),/does not certify production readiness/);});
+add('critical failures block readiness even with a zero pass target',()=>{const p=demo();p.criteria={minCases:1,minPassRate:0};assert.equal(D.quality(p,'ai','baseline').meets,false);assert.equal(D.quality(p,'ai','baseline').critical,2);});
+add('alternative-specific corrections do not invalidate another alternative',()=>{let p=demo();p=D.addCases(p,[nextCase(p,{id:'rules-01',scenario:'rules'})]);p=D.reviewCase(p,'rules-01',{outcome:'pass',by:'Reviewer',reason:'The response requests the required owner approval.',quote:'billing lead',correctionMinutes:0});p=D.approveFix(p,{scenario:'rules',version:'rules-v2',description:'Add an explicit routing instruction to the workflow.',rollback:'Stop if the workflow routes an unapproved financial action.',owner:'Operations owner',approved:true});assert.equal(D.quality(p,'ai','retest').pass,3);assert.equal(p.fixes.rules.version,'rules-v2');});
+add('historical retests remain importable after a new candidate version',()=>{const p=demo();p.fixes.ai.version='v3';assert.equal(D.validateProject(p).cases.length,6);assert.equal(D.quality(p,'ai','retest').n,0);});
+add('approval requires a reviewed baseline',()=>{const p=demo();assert.throws(()=>D.approveFix(p,{scenario:'rules'}),/Review a baseline/);});
+
+add('authorized analysis requires active permission',()=>{const p=authorized();p.consent.process=false;assert.throws(()=>D.economics(p),/permission/);});
+add('expired permission blocks analysis and export',()=>{const p=authorized();p.consent.expiresAt='2020-01-01';assert.throws(()=>D.economics(p),/not active/);assert.throws(()=>D.serializeProject(p),/not active/);});
+add('future grants are not active',()=>{const p=authorized();p.consent.grantedAt='2090-01-01';assert.equal(D.permissionStatus(p,false,'2026-11-20').ok,false);});
+add('invalid calendar dates are not accepted',()=>{const p=authorized();p.consent.grantedAt='2026-02-30';assert.equal(D.permissionStatus(p).ok,false);});
+add('revoked permission blocks business processing',()=>{const p=authorized();p.consent.revoked=true;assert.throws(()=>D.economics(p),/permission/);});
+add('permission to process is not permission to save or transfer',()=>{const p=authorized();p.consent.transfer=false;D.economics(p);assert.throws(()=>D.serializeProject(p),/save\/export/);assert.throws(()=>D.reportHTML(p),/save\/export/);});
+add('authorized positive realization requires a spending rationale',()=>{const p=authorized();p.realizationReason='';assert.throws(()=>D.economics(p),/spending/);});
+add('JSON roundtrip preserves raw project and recomputes derived values',()=>{const p=demo(),q=D.importProject(D.serializeProject(p));assert.equal(q.imported,true);near(D.economics(p).scenarios[2].netHorizon,D.economics(q).scenarios[2].netHorizon);assert.equal(q.revision,p.revision+1);});
+add('fabricated cached results in JSON are never used',()=>{const p=demo();p.result={netHorizon:1e12};const q=D.importProject(JSON.stringify(p));assert.notEqual(D.economics(q).scenarios[2].netHorizon,1e12);});
+add('old/unknown workspace schemas are rejected explicitly',()=>assert.throws(()=>D.importProject('{"schema":"pilotverdict.readiness.v0.4.1"}'),/Unsupported project/));
+add('prototype pollution keys are rejected',()=>{const raw=JSON.stringify(demo()).replace('"title":','"__proto__":{"polluted":true},"title":');assert.throws(()=>D.importProject(raw),/Unsafe object key/);assert.equal({}.polluted,undefined);});
+add('oversize JSON is rejected before parsing',()=>assert.throws(()=>D.importProject(' '.repeat(2000001)),/under 2 MB/));
+add('malformed JSON does not overwrite a valid project',()=>{const p=demo();assert.throws(()=>D.importProject('bad json'));assert.equal(D.quality(p).pass,3);});
+add('duplicate imported IDs are rejected',()=>{const p=demo();p.cases.push(p.cases[0]);assert.throws(()=>D.importProject(JSON.stringify(p)),/Duplicate/);});
+add('imported forged quote is rejected',()=>{const p=demo();p.cases[0].review.quote='not actually in the response';assert.throws(()=>D.importProject(JSON.stringify(p)),/does not match/);});
+add('local event history is capped and does not claim cryptographic integrity',()=>{let p=minimal();for(let i=0;i<320;i++)p=D.record(p,'test','local event');assert.equal(p.history.length,300);assert.equal(p.revision,320);});
+add('escaped report cannot execute injected project markup',()=>{const p=demo();p.title='<img src=x onerror=alert(1)>';p.plan.observedResult='</p><script>alert(1)</script>';const h=D.reportHTML(p);assert.ok(h.includes('&lt;img'));assert.ok(h.includes('&lt;script&gt;'));assert.ok(!h.includes('<script>'));});
+add('report contains both economics and evidence, not only a summary score',()=>{const h=D.reportHTML(demo());for(const term of ['Quality-to-cost linkage','Recorded output reviews','Source evidence','Change and retest','Action and measurement plan','Model assumptions'])assert.ok(h.includes(term));});
+add('report labels fictional results and modeled benefits',()=>{const h=D.reportHTML(demo());assert.match(h,/FICTIONAL EXAMPLE/);assert.match(h,/projections are not observed/);});
+
+const csv='category,monthly_tickets,handle_minutes,repeat_rate,escalation_rate\nExample,100,5,0,0\n';
+add('existing aggregate CSV schema imports into shared project',()=>assert.equal(D.parseWorkloadCSV(csv)[0].monthly_tickets,100));
+add('quoted CSV delimiters and newlines are handled',()=>{const rows=D.parseWorkloadCSV(csv.replace('Example','"Two, categories\nin name"'));assert.match(rows[0].category,/Two, categories\nin name/);});
+add('UTF-8 BOM is supported',()=>assert.equal(D.parseWorkloadCSV('\uFEFF'+csv).length,1));
+add('duplicate CSV headers are rejected',()=>assert.throws(()=>D.parseWorkloadCSV(csv.replace('repeat_rate','category')),/Duplicate/));
+add('unclosed CSV quotes are rejected',()=>assert.throws(()=>D.parseWorkloadCSV(csv+'"bad'),/Unterminated/));
+add('junk after closing quote is rejected instead of silently parsed',()=>assert.throws(()=>D.parseWorkloadCSV(csv.replace('Example','"Example"junk')),/Unexpected text/));
+add('CSV missing a required column is rejected',()=>assert.throws(()=>D.parseWorkloadCSV('category,monthly_tickets\nExample,12'),/Missing CSV/));
+add('CSV missing values is not silently converted to zero',()=>assert.throws(()=>D.parseWorkloadCSV(csv.replace('100,5','100,')),/numeric/));
+add('case CSV imports source links and inputs but no verdicts',()=>{const text='id,source_id,scenario,stage,parent_id,candidate_version,prompt,response\nnew-1,refund-policy,ai,baseline,,v1,Please explain refund policy,Please contact the billing lead\n';const cases=D.parseCaseCSV(text);assert.equal(cases[0].review,null);assert.equal(cases[0].sourceId,'refund-policy');});
+add('case CSV column width mismatches are rejected',()=>assert.throws(()=>D.parseCaseCSV('id,source_id,scenario,stage,parent_id,candidate_version,prompt,response\na,b'),/wrong number/));
+add('case CSV empty body is rejected',()=>assert.throws(()=>D.parseCaseCSV('id,source_id,scenario,stage,parent_id,candidate_version,prompt,response\n'),/1–200/));
+add('seeded 100-scenario invariant: increasing QA cannot improve net value',()=>{let seed=733;const rand=()=>((seed=(1664525*seed+1013904223)>>>0)/2**32);for(let i=0;i<100;i++){const p=minimal();p.settings.realizationRate=rand();p.settings.aiExtraQA=rand()*20;const a=D.economics(p).scenarios[2].netHorizon;p.settings.aiExtraQA+=rand()*10;const b=D.economics(p).scenarios[2].netHorizon;assert.ok(b<=a+1e-9);}});
+add('authorized zero-realization scenario renders sensitivity without inventing a spending rationale',()=>{const p=authorized();p.realizationReason='';p.settings.realizationRate=0;D.economics(p);const s=D.sensitivity(p);assert.equal(s[0].rate,0);assert.equal(s[1].ai,null);assert.equal(s[4].rules,null);});
+add('revocation blocks quality processing as well as economics',()=>{const p=demo();p.mode='authorized';p.consent.process=false;assert.throws(()=>D.quality(p),/permission/);assert.throws(()=>D.hint(p,p.cases[0]),/permission/);});
+add('extreme monetary scales are explicitly rejected',()=>{const p=minimal();p.rows[0].monthly_tickets=10000000;p.rows[0].handle_minutes=1440;p.settings.laborCostHour=10000000;p.settings.productiveFraction=.05;assert.throws(()=>D.economics(p),/model limit/);});

@@ -1,0 +1,37 @@
+{
+  "buildTool": "dependency-free Node bundle",
+  "files": {
+    "index.html": {
+      "bytes": 1990,
+      "sha256": "a2ca179ed8ccad57fc82743652d58315e9a01268a138c44fd234462a4d95ffe4"
+    },
+    "portfolio.html": {
+      "bytes": 1996,
+      "sha256": "42bd6de71a51e07df370c095a83cdf9deda15d54eef861aaa3b3fd759c3529bb"
+    },
+    "assets/app.js": {
+      "bytes": 96679,
+      "sha256": "921016dafc5b8f876381e7f5f03268fb0afde2ae0eb1a73eeb8f2cd8d856ff3c"
+    },
+    "assets/portfolio.js": {
+      "bytes": 96679,
+      "sha256": "27656d6ad3f499dac3b81b540bab839179274e435b77e89b0dd3739b04d15daa"
+    },
+    "assets/style.css": {
+      "bytes": 42894,
+      "sha256": "fdc42da80b8606786aaa58909d396171d762dc99bdf48f596843aaaf6bd19863"
+    },
+    ".nojekyll": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "preview/index.html": {
+      "bytes": 141588,
+      "sha256": "41496248ce7cb9387f39ab8d922aefc18e4f333061a644957c5e6c6629acc9c0"
+    },
+    "preview/portfolio.html": {
+      "bytes": 141588,
+      "sha256": "518281d24ce5975e06fa1f56583668345b30cec6c06d77188a7d9e9446424451"
+    }
+  }
+}

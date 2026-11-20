@@ -1,0 +1,37 @@
+{
+  "sourceArchiveSha256": "127abb0bc037d3dba1b86db36419a8b7fd23de03a58721be0678ba55f182749a",
+  "files": [
+    "LICENSE",
+    "README.md",
+    "examples/workload-template.csv",
+    "package.json",
+    "scripts/build.mjs",
+    "scripts/release_browser_test.py",
+    "src/app.js",
+    "src/domain.js",
+    "src/shell.html",
+    "src/style.css",
+    "src/vendor/csv.js",
+    "src/vendor/model.js",
+    "tests/domain.test.mjs",
+    "tests/release.test.mjs"
+  ],
+  "release": "0.5.1",
+  "importNote": "Text-only import; package commands fixed; copy-only refinements; native file-import assertions wait for asynchronous results.",
+  "postImportSha256": {
+    "package.json": "281f424545d927cae92d2bf1a4524456ac18c92946591decb90e1bf4930c34d5",
+    "LICENSE": "62394c86caf972dc4e016e3bce8e2e8a923c203f3bfa035828e4765a11258afb",
+    "README.md": "ecf0947302cad44c600542558d7a7483588c49e40fd612a2f4a87bc3a25eda0b",
+    "src/app.js": "d7ff1111d01c7cdd96765521ec874f3c112868343017590c709fe9b7f76242c2",
+    "src/domain.js": "b83a71634ad363c1b36a4dc9211e78d6501a043bf7a3832af130180ccd5672a8",
+    "src/style.css": "fdc42da80b8606786aaa58909d396171d762dc99bdf48f596843aaaf6bd19863",
+    "src/shell.html": "e0d56d41f6ae4606a3c8c53ace45fb5f121a0d08de9a05b77c974c8f15bab39a",
+    "src/vendor/csv.js": "fc5fa5dde1c6f41b754930ca8600642883a60910d9436b37be788049d151b59c",
+    "src/vendor/model.js": "b9fbbd2c0be8cfd812cea9e6d87e7c4ec144513db613c4712054b7a6ac7f93b6",
+    "tests/domain.test.mjs": "162dfe27bd1527e6e228686bbae44b18f0d38addb1df8357335a61d5d4f7e3b7",
+    "tests/release.test.mjs": "61514ca33564c4132bfc206c2868c9a1cd4018149fb9f0f4b3ff38a591a80835",
+    "scripts/build.mjs": "64a5bf8132b3533ac6f7696f62dbc1fc3ca6e18d5fb83d57f461b9b68430c9c8",
+    "scripts/release_browser_test.py": "73c78385d46c4239e03121aad96b87f2161ff911bae9ef194f5495ae78572017",
+    "examples/workload-template.csv": "1f2cad679a93f0e39cb3cc12e309409036cb3db057b64801620d66f5b6876fcb"
+  }
+}

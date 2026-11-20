@@ -1,0 +1,16 @@
+{
+  "name": "pilotverdict-integrated-preview",
+  "version": "0.5.1",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/domain.test.mjs tests/release.test.mjs",
+    "build": "node scripts/build.mjs",
+    "serve": "python3 -m http.server 4173 --bind 127.0.0.1",
+    "test:browser": "python3 scripts/release_browser_test.py",
+    "check": "node --check src/domain.js && node --check src/app.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,17 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {execFileSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
+const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8');
+execFileSync(process.execPath,['scripts/build.mjs'],{cwd:new URL('..',import.meta.url)});
+test('approved blue and original home component classes are retained',()=>{const s=read('src/style.css');assert.ok(s.includes('--pv48-blue:#075bea'));for(const v of ['.pv48-public-hero','.pv48-browser','.pv48-peek-sidebar','.pvnav-header'])assert.ok(s.includes(v));});
+test('both product functions share four plain-language steps',()=>{const s=read('src/app.js');for(const v of ["['project','Your work']","['economics','Costs']","['validation','Check answers']","['decision','Results']"])assert.ok(s.includes(v));});
+test('home has an own-input action and a worked example',()=>{const s=read('src/app.js');assert.ok(s.includes('Start analysis'));assert.ok(s.includes('See an example'));});
+test('sources, retests and exports remain implemented',()=>{const s=read('src/app.js');for(const v of ['addSource','reviewCase','approveFix','parseWorkloadCSV','parseCaseCSV','serializeProject','reportHTML'])assert.ok(s.includes(v));});
+test('hosted app uses local application script and blocks network data connections',()=>{const s=read('index.html');assert.ok(s.includes('./assets/app.js'));assert.ok(s.includes("connect-src 'none'"));});
+test('standalone executable matches its CSP hash',()=>{const s=read('preview/index.html'),js=s.match(/<script>([\s\S]*?)<\/script>/)[1];const h=createHash('sha256').update(js).digest('base64');assert.ok(s.includes("script-src 'sha256-"+h+"'"));});
+test('standalone stylesheet matches its CSP hash',()=>{const s=read('preview/index.html'),css=s.match(/<style>([\s\S]*?)<\/style>/)[1];const h=createHash('sha256').update(css).digest('base64');assert.ok(s.includes("style-src 'sha256-"+h+"'"));});
+test('no font bytes embedded in application artifacts',()=>{for(const p of ['index.html','src/style.css','preview/index.html'])assert.doesNotMatch(read(p),/data:(?:font|application\/font)/);});
+test('portfolio entry starts in the project story',()=>assert.ok(read('assets/portfolio.js').includes(":'story';\nrender();")));
+test('script terminators cannot escape the application bundle',()=>assert.ok(!read('assets/app.js').toLowerCase().includes('</script')));
