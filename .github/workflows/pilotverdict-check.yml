@@ -1,43 +1,62 @@
 name: Verify PilotVerdict release
 on:
   push:
-    branches: ['release/pilotverdict-simple-2026-11-20']
+    branches: ['release/pilotverdict-simple-2026-11-20', 'main']
+    paths: ['pilotverdict/**', '.release-pilotverdict/**', 'scripts/*pilotverdict*', '.github/workflows/pilotverdict-check.yml', 'index.html']
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
+concurrency:
+  group: pilotverdict-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Inspect existing portfolio structure
+      - name: Import exact reviewed release and preserve portfolio
         run: |
-          python - <<'PY'
-          from html.parser import HTMLParser
-          from pathlib import Path
-          class P(HTMLParser):
-              def handle_starttag(self, tag, attrs):
-                  a=dict(attrs)
-                  if tag in ('nav','section') or (tag=='a' and not a.get('href','').startswith('data:')):
-                      print(tag, {k:v[:180] for k,v in a.items() if k in ('id','class','href')})
-              def handle_data(self, data):
-                  s=data.strip()
-                  if s and len(s)<180 and ('Pilot' in s or 'Project' in s or 'Work' in s): print('TEXT',s)
-          P().feed(Path('index.html').read_text())
-          PY
-      - name: Release tests
-        if: ${{ hashFiles('pilotverdict/package.json') != '' }}
+          python scripts/unpack_pilotverdict.py
+          python scripts/add_pilotverdict_to_portfolio.py
+      - name: Unit tests and reproducible build
         working-directory: pilotverdict
         run: |
           npm test
+          npm run check
           npm run build
+      - name: Install browser-only QA dependencies
+        working-directory: pilotverdict
+        run: |
           pip install playwright==1.56.0
           python -m playwright install --with-deps chromium
-          python scripts/release_browser_test.py
+          npm install --no-save --ignore-scripts --package-lock=false axe-core@4.10.3
+      - name: Native HTTP user journeys, privacy and accessibility
+        working-directory: pilotverdict
+        run: python scripts/release_browser_test.py
+      - name: Preserve test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pilotverdict-native-qa
+          path: pilotverdict/qa/
+          if-no-files-found: ignore
+      - name: Commit verified release on the isolated release branch
+        if: success() && github.ref_name == 'release/pilotverdict-simple-2026-11-20'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add index.html pilotverdict/
+          git rm -r --ignore-unmatch .release-pilotverdict/
+          if ! git diff --cached --quiet; then
+            git commit -m 'release: verified PilotVerdict 0.5.1 with original design and shared workflow (AI-assisted)'
+            git push origin HEAD:${{ github.ref_name }}
+          fi
