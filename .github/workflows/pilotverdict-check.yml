@@ -2,7 +2,7 @@ name: Verify PilotVerdict release
 on:
   push:
     branches: ['release/pilotverdict-simple-2026-11-20', 'main']
-    paths: ['pilotverdict/**', '.release-pilotverdict/**', 'scripts/*pilotverdict*', '.github/workflows/pilotverdict-check.yml', 'index.html']
+    paths: ['pilotverdict/**', '.release-pilotverdict/**', 'scripts/*pilotverdict*', '.github/workflows/pilotverdict-check.yml', 'index.html', '.nojekyll']
   workflow_dispatch:
 permissions:
   contents: write
@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
+          ref: ${{ github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -44,6 +44,12 @@ jobs:
       - name: Native HTTP user journeys, privacy and accessibility
         working-directory: pilotverdict
         run: python scripts/release_browser_test.py
+      - name: Verify exact public HTTPS deployment and portfolio navigation
+        if: github.ref_name == 'main'
+        run: |
+          python scripts/verify_pilotverdict_live.py
+          cd pilotverdict
+          python scripts/release_browser_test.py --base-url https://stutijohri.github.io/pilotverdict/
       - name: Preserve test evidence
         if: always()
         uses: actions/upload-artifact@v4
